@@ -31,7 +31,7 @@ This skill handles sensitive email data. Key security principles:
 
 #### Authentication
 - **Bridge passwords are NOT your ProtonMail password** — Bridge generates separate credentials
-- Prefer OS keychain storage (`keytar`) with environment fallback for Bridge password
+- Prefer OS keychain storage (`keytar`) or password file/systemd credentials, with environment fallback only when needed
 - Never log or transmit credentials
 - Never commit credentials to version control
 

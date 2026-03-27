@@ -135,6 +135,7 @@ Optional fallback env vars:
 ```json
 {
   "PROTONMAIL_BRIDGE_PASSWORD": "bridge-generated-password",
+  "PROTONMAIL_BRIDGE_PASSWORD_FILE": "/run/secrets/protonmail_bridge_password",
   "PROTONMAIL_KEYCHAIN_SERVICE": "openclaw-protonmail-skill",
   "PROTONMAIL_KEYCHAIN_ACCOUNT": "your-email@pm.me"
 }
@@ -142,9 +143,30 @@ Optional fallback env vars:
 
 **Important Notes:**
 - Use `skills.entries.protonmail` (not `skills.protonmail`)
-- Password resolution order is: config value → OS keychain → `PROTONMAIL_BRIDGE_PASSWORD`
+- Password resolution order is: config value → OS keychain → `PROTONMAIL_BRIDGE_PASSWORD_FILE` (or `CREDENTIALS_DIRECTORY/protonmail_bridge_password`) → `PROTONMAIL_BRIDGE_PASSWORD`
 - Never commit your config with real credentials to version control
 - The Bridge password is separate from your ProtonMail password
+
+### Ubuntu server (no plaintext password in config/env)
+
+Use a password file or systemd credentials so the password is never stored in `openclaw.json` or shell history.
+
+Example systemd unit override:
+
+```ini
+[Service]
+LoadCredential=protonmail_bridge_password:/etc/openclaw/secrets/protonmail_bridge_password
+Environment=PROTONMAIL_ACCOUNT=your-email@pm.me
+```
+
+Then keep `/etc/openclaw/secrets/protonmail_bridge_password` owned by the service user with strict permissions:
+
+```bash
+sudo chown openclaw:openclaw /etc/openclaw/secrets/protonmail_bridge_password
+sudo chmod 600 /etc/openclaw/secrets/protonmail_bridge_password
+```
+
+The skill automatically reads from `CREDENTIALS_DIRECTORY/protonmail_bridge_password` when available.
 
 ## Usage
 

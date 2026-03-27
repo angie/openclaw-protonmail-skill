@@ -42,10 +42,13 @@ Use ProtonMail for secure email via Proton Mail Bridge.
    ```json
    {
      "PROTONMAIL_BRIDGE_PASSWORD": "bridge-generated-password",
+     "PROTONMAIL_BRIDGE_PASSWORD_FILE": "/run/secrets/protonmail_bridge_password",
      "PROTONMAIL_KEYCHAIN_SERVICE": "openclaw-protonmail-skill",
      "PROTONMAIL_KEYCHAIN_ACCOUNT": "your-email@pm.me"
    }
    ```
+
+   Password resolution order: config value -> OS keychain -> password file (`PROTONMAIL_BRIDGE_PASSWORD_FILE` or `CREDENTIALS_DIRECTORY/protonmail_bridge_password`) -> `PROTONMAIL_BRIDGE_PASSWORD`.
 
    **Get Bridge credentials:**
    - In Bridge, click your account → Mailbox configuration

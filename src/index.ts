@@ -87,6 +87,8 @@ async function loadConfig(
     account,
     bridgePassword: config?.bridgePassword,
     envPassword: process.env.PROTONMAIL_BRIDGE_PASSWORD,
+    envPasswordFile: process.env.PROTONMAIL_BRIDGE_PASSWORD_FILE,
+    credentialsDirectory: process.env.CREDENTIALS_DIRECTORY,
     keychainService: config?.keychainService || process.env.PROTONMAIL_KEYCHAIN_SERVICE,
     keychainAccount: config?.keychainAccount || process.env.PROTONMAIL_KEYCHAIN_ACCOUNT,
   });

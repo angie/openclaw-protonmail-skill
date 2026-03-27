@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environment variable support (PROTONMAIL_ACCOUNT, PROTONMAIL_BRIDGE_PASSWORD)
 - Proper OpenClaw skill config format (`skills.entries.protonmail`)
 - Optional keychain-first Bridge password resolution (`keytar`) with env fallback
+- Optional Bridge password file resolution (`PROTONMAIL_BRIDGE_PASSWORD_FILE`) and systemd credentials fallback (`CREDENTIALS_DIRECTORY/protonmail_bridge_password`)
 
 ### Changed
 - Updated nodemailer to v8.0.1 (security fixes)
