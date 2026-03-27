@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Proper OpenClaw skill config format (`skills.entries.protonmail`)
 - Optional keychain-first Bridge password resolution (`keytar`) with env fallback
 - Optional Bridge password file resolution (`PROTONMAIL_BRIDGE_PASSWORD_FILE`) and systemd credentials fallback (`CREDENTIALS_DIRECTORY/protonmail_bridge_password`)
+- Ubuntu helper script for secure systemd credential setup (`scripts/setup-systemd-credentials.sh`)
 
 ### Changed
 - Updated nodemailer to v8.0.1 (security fixes)

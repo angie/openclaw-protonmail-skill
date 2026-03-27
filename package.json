@@ -28,6 +28,7 @@
   "files": [
     "dist",
     "bin",
+    "scripts",
     "SKILL.md",
     "README.md"
   ],
@@ -36,7 +37,8 @@
     "dev": "tsc --watch",
     "test": "jest",
     "lint": "eslint src --ext .ts",
-    "install-skill": "npm run build && mkdir -p ~/.openclaw/skills/protonmail && cp -r src dist bin package.json SKILL.md README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md CODE_OF_CONDUCT.md LICENSE examples tsconfig.json ~/.openclaw/skills/protonmail/ && chmod +x ~/.openclaw/skills/protonmail/bin/protonmail && echo 'Skill installed to ~/.openclaw/skills/protonmail'"
+    "install-skill": "npm run build && mkdir -p ~/.openclaw/skills/protonmail && cp -r src dist bin scripts package.json SKILL.md README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md CODE_OF_CONDUCT.md LICENSE examples tsconfig.json ~/.openclaw/skills/protonmail/ && chmod +x ~/.openclaw/skills/protonmail/bin/protonmail ~/.openclaw/skills/protonmail/scripts/setup-systemd-credentials.sh && echo 'Skill installed to ~/.openclaw/skills/protonmail'",
+    "setup:systemd-credentials": "bash scripts/setup-systemd-credentials.sh"
   },
   "dependencies": {
     "imapflow": "^1.2.18",

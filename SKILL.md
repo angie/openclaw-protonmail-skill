@@ -50,6 +50,11 @@ Use ProtonMail for secure email via Proton Mail Bridge.
 
    Password resolution order: config value -> OS keychain -> password file (`PROTONMAIL_BRIDGE_PASSWORD_FILE` or `CREDENTIALS_DIRECTORY/protonmail_bridge_password`) -> `PROTONMAIL_BRIDGE_PASSWORD`.
 
+   Ubuntu/systemd helper:
+   ```bash
+   sudo npm run setup:systemd-credentials -- --service openclaw --account your-email@pm.me
+   ```
+
    **Get Bridge credentials:**
    - In Bridge, click your account → Mailbox configuration
    - Copy the IMAP password (NOT your ProtonMail password)

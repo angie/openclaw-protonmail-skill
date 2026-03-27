@@ -151,6 +151,14 @@ Optional fallback env vars:
 
 Use a password file or systemd credentials so the password is never stored in `openclaw.json` or shell history.
 
+Quick setup script:
+
+```bash
+sudo npm run setup:systemd-credentials -- --service openclaw --account your-email@pm.me
+```
+
+You will be prompted securely for the Bridge password, then the script will create/update the systemd override and restart the service.
+
 Example systemd unit override:
 
 ```ini
