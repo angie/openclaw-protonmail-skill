@@ -9,11 +9,31 @@
 
 import nodemailer from 'nodemailer';
 import type { Transporter, SendMailOptions } from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import {
   sanitiseHeaderValue,
   sanitiseOptionalHeaderValue,
   sanitiseRequiredText,
 } from './validation';
+
+export type SendResult = SMTPTransport.SentMessageInfo;
+
+type ReplyAddress = {
+  address?: string;
+  name?: string;
+};
+
+type ReplyAddressObject = {
+  value?: ReplyAddress[];
+};
+
+export type ReplyMessage = {
+  from?: ReplyAddressObject;
+  replyTo?: ReplyAddressObject;
+  subject?: string;
+  messageId?: string;
+  references?: string | string[];
+};
 
 /**
  * SMTP connection configuration
@@ -118,7 +138,7 @@ export class SMTPClient {
     subject: string,
     body: string,
     options?: SendOptions
-  ): Promise<any> {
+  ): Promise<SendResult> {
     const sanitisedTo = sanitiseRecipients(to, 'to');
     const sanitisedSubject = sanitiseHeaderValue(subject, 'subject');
     const sanitisedBody = sanitiseRequiredText(body, 'body');
@@ -165,7 +185,7 @@ export class SMTPClient {
    * await smtp.reply(original, 'Thanks, I'll review this today.');
    * ```
    */
-  async reply(originalMessage: any, body: string): Promise<any> {
+  async reply(originalMessage: ReplyMessage, body: string): Promise<SendResult> {
     // mailparser's ParsedMail shapes From and Reply-To as AddressObject,
     // not as arrays. The address lives at .value[0].address — not [0].address.
     //

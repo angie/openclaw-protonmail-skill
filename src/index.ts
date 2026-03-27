@@ -24,6 +24,9 @@
 
 import { IMAPClient } from './imap';
 import { SMTPClient } from './smtp';
+import type { ParsedMail } from 'mailparser';
+import type { EmailMetadata } from './imap';
+import type { SendOptions, SendResult } from './smtp';
 import { registerTools } from './tools';
 import { resolveBridgePassword } from './credential-store';
 import { assertMessageUid, normaliseLimit } from './validation';
@@ -217,7 +220,7 @@ export class ProtonMailSkill {
    * const recent = await skill.listInbox(5, true); // 5 unread emails
    * ```
    */
-  async listInbox(limit = 10, unreadOnly = false): Promise<any[]> {
+  async listInbox(limit = 10, unreadOnly = false): Promise<EmailMetadata[]> {
     const { imap } = this.getClients();
     const validatedLimit = normaliseLimit(limit, {
       defaultValue: DEFAULT_LIST_LIMIT,
@@ -239,7 +242,7 @@ export class ProtonMailSkill {
    * const results = await skill.searchEmails('from:alice@example.com', 20);
    * ```
    */
-  async searchEmails(query: string, limit = 10): Promise<any[]> {
+  async searchEmails(query: string, limit = 10): Promise<EmailMetadata[]> {
     const { imap } = this.getClients();
     const validatedLimit = normaliseLimit(limit, {
       defaultValue: DEFAULT_SEARCH_LIMIT,
@@ -257,7 +260,7 @@ export class ProtonMailSkill {
    * 
    * @throws {Error} If message ID is invalid or email doesn't exist
    */
-  async readEmail(messageId: string): Promise<any> {
+  async readEmail(messageId: string): Promise<ParsedMail> {
     const { imap } = this.getClients();
     return imap.readMessage(assertMessageUid(messageId));
   }
@@ -281,7 +284,7 @@ export class ProtonMailSkill {
    * );
    * ```
    */
-  async sendEmail(to: string, subject: string, body: string, options?: any): Promise<any> {
+  async sendEmail(to: string, subject: string, body: string, options?: SendOptions): Promise<SendResult> {
     const { smtp } = this.getClients();
     return smtp.send(to, subject, body, options);
   }
@@ -297,7 +300,7 @@ export class ProtonMailSkill {
    * Automatically sets Reply-To, In-Reply-To, and References headers
    * to maintain threading.
    */
-  async replyToEmail(messageId: string, body: string): Promise<any> {
+  async replyToEmail(messageId: string, body: string): Promise<SendResult> {
     const { imap, smtp } = this.getClients();
     const original = await imap.readMessage(assertMessageUid(messageId));
     return smtp.reply(original, body);
