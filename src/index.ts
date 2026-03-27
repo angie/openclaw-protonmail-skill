@@ -25,6 +25,11 @@
 import { IMAPClient } from './imap';
 import { SMTPClient } from './smtp';
 import { registerTools } from './tools';
+import { assertMessageUid, normaliseLimit } from './validation';
+
+const DEFAULT_LIST_LIMIT = 10;
+const DEFAULT_SEARCH_LIMIT = 10;
+const MAX_RESULT_LIMIT = 100;
 
 /**
  * Configuration options for ProtonMail skill
@@ -169,7 +174,12 @@ export class ProtonMailSkill {
    * ```
    */
   async listInbox(limit = 10, unreadOnly = false): Promise<any[]> {
-    return this.imap.listInbox(limit, unreadOnly);
+    const validatedLimit = normaliseLimit(limit, {
+      defaultValue: DEFAULT_LIST_LIMIT,
+      maxValue: MAX_RESULT_LIMIT,
+    });
+
+    return this.imap.listInbox(validatedLimit, unreadOnly);
   }
 
   /**
@@ -185,7 +195,12 @@ export class ProtonMailSkill {
    * ```
    */
   async searchEmails(query: string, limit = 10): Promise<any[]> {
-    return this.imap.search(query, limit);
+    const validatedLimit = normaliseLimit(limit, {
+      defaultValue: DEFAULT_SEARCH_LIMIT,
+      maxValue: MAX_RESULT_LIMIT,
+    });
+
+    return this.imap.search(query, validatedLimit);
   }
 
   /**
@@ -197,7 +212,7 @@ export class ProtonMailSkill {
    * @throws {Error} If message ID is invalid or email doesn't exist
    */
   async readEmail(messageId: string): Promise<any> {
-    return this.imap.readMessage(messageId);
+    return this.imap.readMessage(assertMessageUid(messageId));
   }
 
   /**
@@ -235,7 +250,7 @@ export class ProtonMailSkill {
    * to maintain threading.
    */
   async replyToEmail(messageId: string, body: string): Promise<any> {
-    const original = await this.imap.readMessage(messageId);
+    const original = await this.imap.readMessage(assertMessageUid(messageId));
     return this.smtp.reply(original, body);
   }
 }

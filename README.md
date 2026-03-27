@@ -155,7 +155,7 @@ The skill provides these tool functions to OpenClaw:
 
 - `protonmail-list-inbox` — List recent inbox messages
 - `protonmail-search` — Search emails by query
-- `protonmail-read` — Read a specific email by ID
+- `protonmail-read` — Read a specific email by ID (metadata by default)
 - `protonmail-send` — Send a new email
 - `protonmail-reply` — Reply to an email thread
 

@@ -40,8 +40,8 @@
   },
   "dependencies": {
     "imap": "^0.8.19",
-    "nodemailer": "^8.0.1",
-    "mailparser": "^3.7.1"
+    "nodemailer": "^8.0.4",
+    "mailparser": "^3.9.6"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

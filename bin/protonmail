@@ -5,12 +5,13 @@
  * Usage:
  *   protonmail list-inbox [--limit=10] [--unread]
  *   protonmail search <query> [--limit=10]
- *   protonmail read <message-id>
+ *   protonmail read <message-id> [--include-body]
  *   protonmail send --to=<email> --subject=<subject> --body=<body> [--cc=<email>] [--bcc=<email>]
  *   protonmail reply <message-id> --body=<body>
  */
 
 const { ProtonMailSkill } = require('../dist/index.js');
+const { formatReadEmailOutput, redactErrorMessage } = require('../dist/cli-output.js');
 
 async function main() {
   const args = process.argv.slice(2);
@@ -49,24 +50,13 @@ async function main() {
 
       case 'read': {
         const messageId = args[1];
+        const includeBody = args.includes('--include-body');
         if (!messageId) {
           console.error('Error: read requires a message ID');
           process.exit(1);
         }
         const email = await skill.readEmail(messageId);
-        console.log(JSON.stringify({
-          from: email.from?.text,
-          to: email.to?.text,
-          subject: email.subject,
-          date: email.date,
-          text: email.text,
-          html: email.html,
-          attachments: email.attachments?.map(a => ({
-            filename: a.filename,
-            contentType: a.contentType,
-            size: a.size
-          }))
-        }, null, 2));
+        console.log(JSON.stringify(formatReadEmailOutput(email, includeBody), null, 2));
         break;
       }
 
@@ -109,7 +99,7 @@ async function main() {
 
     await skill.cleanup();
   } catch (err) {
-    console.error('Error:', err.message);
+    console.error('Error:', redactErrorMessage(err));
     await skill.cleanup();
     process.exit(1);
   }

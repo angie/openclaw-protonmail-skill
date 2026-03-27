@@ -55,8 +55,11 @@ protonmail list-inbox --limit=10 [--unread]
 # Search emails
 protonmail search "from:alice@example.com" --limit=20
 
-# Read specific email
+# Read specific email metadata
 protonmail read <uid>
+
+# Read specific email including body content
+protonmail read <uid> --include-body
 
 # Send email
 protonmail send --to=bob@example.com --subject="Meeting" --body="See you at 3pm"
