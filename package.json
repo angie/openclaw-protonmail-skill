@@ -39,9 +39,12 @@
     "install-skill": "npm run build && mkdir -p ~/.openclaw/skills/protonmail && cp -r src dist bin package.json SKILL.md README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md CODE_OF_CONDUCT.md LICENSE examples tsconfig.json ~/.openclaw/skills/protonmail/ && chmod +x ~/.openclaw/skills/protonmail/bin/protonmail && echo 'Skill installed to ~/.openclaw/skills/protonmail'"
   },
   "dependencies": {
-    "imapflow": "^1.1.1",
+    "imapflow": "^1.2.18",
     "nodemailer": "^8.0.4",
     "mailparser": "^3.9.6"
+  },
+  "optionalDependencies": {
+    "keytar": "^7.9.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

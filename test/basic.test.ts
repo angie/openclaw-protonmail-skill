@@ -57,13 +57,13 @@ describe('Configuration validation', () => {
     process.env.PROTONMAIL_ACCOUNT = 'test@pm.me';
   });
   
-  it('should throw error when password is missing', () => {
+  it('should allow construction when password is resolved later', () => {
     delete process.env.PROTONMAIL_BRIDGE_PASSWORD;
-    
+
     expect(() => {
       new ProtonMailSkill({ account: 'test@pm.me' });
-    }).toThrow('ProtonMail Bridge password not configured');
-    
+    }).not.toThrow();
+
     process.env.PROTONMAIL_BRIDGE_PASSWORD = 'test-password';
   });
 });
