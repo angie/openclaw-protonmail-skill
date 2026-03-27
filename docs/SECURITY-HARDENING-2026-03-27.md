@@ -16,16 +16,14 @@ This document tracks the hardening work implemented after the deep security revi
 - Added safer CLI read output defaults (metadata-only) with optional `--include-body`.
 - Added CLI error redaction helper to avoid unsafe object dumps.
 - Tightened CI to fail on lint/test and added production dependency audit gate.
+- Replaced legacy `imap` dependency with maintained `imapflow` client implementation.
+- Added optional keychain-backed Bridge password resolution with environment fallback.
 - Updated runtime deps to reduce known vulnerability exposure:
   - `nodemailer` `^8.0.4`
   - `mailparser` `^3.9.6`
 
 ## Remaining Risk / Next Steps
 
-- `imap -> utf7 -> semver` transitive high-severity advisory remains.
-  - Recommended next step: replace `imap` with an actively maintained alternative.
-- Keychain-backed credential loading is still pending.
-  - Recommended next step: implement optional OS keychain provider with env fallback.
 - Localhost Bridge authenticity checks are still limited.
   - Recommended next step: add robust Bridge identity/provenance verification where feasible.
 
