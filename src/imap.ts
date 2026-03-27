@@ -1,4 +1,4 @@
-import Imap from 'imap';
+import { ImapFlow, SearchObject } from 'imapflow';
 import { ParsedMail, simpleParser } from 'mailparser';
 import { assertMessageUid, normaliseLimit } from './validation';
 
@@ -26,17 +26,29 @@ export interface EmailMetadata {
 }
 
 export class IMAPClient {
-  private imap: Imap;
+  private client: ImapFlow;
   private isConnected = false;
 
   constructor(config: IMAPConfig) {
-    this.imap = new Imap(config);
+    this.client = new ImapFlow({
+      host: config.host,
+      port: config.port,
+      secure: config.tls,
+      doSTARTTLS: false,
+      auth: {
+        user: config.user,
+        pass: config.password,
+      },
+      tls: config.tlsOptions,
+      logger: false,
+      connectionTimeout: CONNECT_TIMEOUT_MS,
+    });
 
-    this.imap.on('error', () => {
+    this.client.on('error', () => {
       this.isConnected = false;
     });
 
-    this.imap.on('end', () => {
+    this.client.on('close', () => {
       this.isConnected = false;
     });
   }
@@ -46,29 +58,20 @@ export class IMAPClient {
       return;
     }
 
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('IMAP connection timeout - is Bridge running?'));
-      }, CONNECT_TIMEOUT_MS);
-
-      this.imap.once('ready', () => {
-        clearTimeout(timeout);
-        this.isConnected = true;
-        resolve();
-      });
-
-      this.imap.once('error', (err: Error) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
-
-      this.imap.connect();
-    });
+    await withTimeout(this.client.connect(), CONNECT_TIMEOUT_MS, 'IMAP connection timeout - is Bridge running?');
+    this.isConnected = true;
   }
 
   async disconnect(): Promise<void> {
-    if (this.isConnected) {
-      this.imap.end();
+    if (!this.isConnected) {
+      return;
+    }
+
+    try {
+      await this.client.logout();
+    } catch {
+      this.client.close();
+    } finally {
       this.isConnected = false;
     }
   }
@@ -79,66 +82,32 @@ export class IMAPClient {
       maxValue: MAX_RESULT_LIMIT,
     });
 
-    return new Promise((resolve, reject) => {
-      this.imap.openBox('INBOX', true, (openError) => {
-        if (openError) {
-          reject(openError);
-          return;
-        }
+    await this.client.mailboxOpen('INBOX', { readOnly: true });
 
-        const searchCriteria = unreadOnly ? ['UNSEEN'] : ['ALL'];
+    const query: SearchObject = unreadOnly ? { seen: false } : { all: true };
+    const results = await this.client.search(query, { uid: true });
+    if (!results || results.length === 0) {
+      return [];
+    }
 
-        this.imap.search(searchCriteria, (searchError, results) => {
-          if (searchError) {
-            reject(searchError);
-            return;
-          }
+    const uids = results.slice(-validatedLimit).reverse();
+    const emails: EmailMetadata[] = [];
 
-          if (!results || results.length === 0) {
-            resolve([]);
-            return;
-          }
-
-          const uids = results.slice(-validatedLimit).reverse();
-          const emails: EmailMetadata[] = [];
-          const fetch = this.imap.fetch(uids, {
-            bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE)',
-            struct: true,
-          });
-
-          fetch.on('message', (msg) => {
-            let buffer = '';
-            let uid = '';
-
-            msg.on('body', (stream) => {
-              stream.on('data', (chunk) => {
-                buffer += chunk.toString('utf8');
-              });
-            });
-
-            msg.once('attributes', (attrs) => {
-              uid = attrs.uid.toString();
-            });
-
-            msg.once('end', () => {
-              const header = Imap.parseHeader(buffer);
-              emails.push({
-                uid,
-                from: Array.isArray(header.from) ? header.from[0] : header.from || '',
-                subject: Array.isArray(header.subject) ? header.subject[0] : header.subject || '',
-                date: new Date(Array.isArray(header.date) ? header.date[0] : header.date || ''),
-                flags: [],
-              });
-            });
-          });
-
-          fetch.once('error', reject);
-          fetch.once('end', () => {
-            resolve(emails);
-          });
-        });
+    for await (const message of this.client.fetch(
+      uids,
+      { uid: true, envelope: true, flags: true },
+      { uid: true }
+    )) {
+      emails.push({
+        uid: message.uid.toString(),
+        from: message.envelope?.from?.[0]?.address || '',
+        subject: message.envelope?.subject || '',
+        date: message.envelope?.date || new Date(''),
+        flags: Array.from(message.flags || []),
       });
-    });
+    }
+
+    return emails;
   }
 
   async search(query: string, limit = DEFAULT_LIMIT): Promise<EmailMetadata[]> {
@@ -147,70 +116,64 @@ export class IMAPClient {
       maxValue: MAX_RESULT_LIMIT,
     });
 
-    return new Promise((resolve, reject) => {
-      this.imap.openBox('INBOX', true, (openError) => {
-        if (openError) {
-          reject(openError);
-          return;
-        }
+    await this.client.mailboxOpen('INBOX', { readOnly: true });
 
-        const criteria = this.parseSearchQuery(query);
+    const criteria = this.parseSearchQuery(query);
+    const results = await this.client.search(criteria, { uid: true });
+    if (!results || results.length === 0) {
+      return [];
+    }
 
-        this.imap.search(criteria, (searchError, results) => {
-          if (searchError) {
-            reject(searchError);
-            return;
-          }
+    const uids = results.slice(-validatedLimit).reverse();
+    const emails: EmailMetadata[] = [];
 
-          if (!results || results.length === 0) {
-            resolve([]);
-            return;
-          }
-
-          const uids = results.slice(-validatedLimit).reverse();
-          const emails: EmailMetadata[] = [];
-          const fetch = this.imap.fetch(uids, {
-            bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE)',
-            struct: true,
-          });
-
-          fetch.on('message', (msg) => {
-            let buffer = '';
-            let uid = '';
-
-            msg.on('body', (stream) => {
-              stream.on('data', (chunk) => {
-                buffer += chunk.toString('utf8');
-              });
-            });
-
-            msg.once('attributes', (attrs) => {
-              uid = attrs.uid.toString();
-            });
-
-            msg.once('end', () => {
-              const header = Imap.parseHeader(buffer);
-              emails.push({
-                uid,
-                from: Array.isArray(header.from) ? header.from[0] : header.from || '',
-                subject: Array.isArray(header.subject) ? header.subject[0] : header.subject || '',
-                date: new Date(Array.isArray(header.date) ? header.date[0] : header.date || ''),
-                flags: [],
-              });
-            });
-          });
-
-          fetch.once('error', reject);
-          fetch.once('end', () => {
-            resolve(emails);
-          });
-        });
+    for await (const message of this.client.fetch(
+      uids,
+      { uid: true, envelope: true, flags: true },
+      { uid: true }
+    )) {
+      emails.push({
+        uid: message.uid.toString(),
+        from: message.envelope?.from?.[0]?.address || '',
+        subject: message.envelope?.subject || '',
+        date: message.envelope?.date || new Date(''),
+        flags: Array.from(message.flags || []),
       });
-    });
+    }
+
+    return emails;
   }
 
-  private parseSearchQuery(query: string): any[] {
-    const criteria: any[] = [];
+  async readMessage(messageId: string): Promise<ParsedMail> {
+    const uid = Number(assertMessageUid(messageId));
+    await this.client.mailboxOpen('INBOX', { readOnly: true });
+
+    const message = await withTimeout(
+      this.client.fetchOne(
+        uid,
+        {
+          uid: true,
+          source: { maxLength: MAX_MESSAGE_BYTES + 1 },
+        },
+        { uid: true }
+      ),
+      READ_TIMEOUT_MS,
+      'Timed out while reading email content'
+    );
+
+    if (!message || !message.source) {
+      throw new Error('Message not found');
+    }
+
+    if (message.source.length > MAX_MESSAGE_BYTES) {
+      throw new Error(`Email content exceeds limit of ${MAX_MESSAGE_BYTES} bytes`);
+    }
+
+    return simpleParser(message.source);
+  }
+
+  private parseSearchQuery(query: string): SearchObject {
+    const criteria: SearchObject = {};
     const normalisedQuery = this.sanitizeSearchInput(query);
     const filterRegex = /(from|subject|body):(?:"([^"]{1,200})"|([^\s]{1,200}))/gi;
     let match: RegExpExecArray | null;
@@ -223,9 +186,9 @@ export class IMAPClient {
         continue;
       }
 
-      if (key === 'from') criteria.push(['FROM', value]);
-      if (key === 'subject') criteria.push(['SUBJECT', value]);
-      if (key === 'body') criteria.push(['BODY', value]);
+      if (key === 'from') criteria.from = value;
+      if (key === 'subject') criteria.subject = value;
+      if (key === 'body') criteria.body = value;
     }
 
     const dateMatch = normalisedQuery.match(/newer_than:(\d{1,3})([dh])/i);
@@ -239,12 +202,11 @@ export class IMAPClient {
         } else if (unit === 'h') {
           date.setHours(date.getHours() - value);
         }
-
-        criteria.push(['SINCE', date]);
+        criteria.since = date;
       }
     }
 
-    if (criteria.length === 0) {
+    if (Object.keys(criteria).length === 0) {
       const fallbackQuery = normalisedQuery
         .replace(/\b(from|subject|body|newer_than):[^\s]+/gi, '')
         .trim();
@@ -252,7 +214,8 @@ export class IMAPClient {
       if (!fallback) {
         throw new Error('Search query is empty or contains unsupported characters');
       }
-      criteria.push(['SUBJECT', fallback]);
+
+      return { subject: fallback };
     }
 
     return criteria;
@@ -298,104 +261,22 @@ export class IMAPClient {
 
     return false;
   }
+}
 
-  async readMessage(messageId: string): Promise<ParsedMail> {
-    const uid = assertMessageUid(messageId);
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
 
-    return new Promise((resolve, reject) => {
-      let settled = false;
-
-      const fail = (error: Error): void => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        clearTimeout(timeout);
-        reject(error);
-      };
-
-      const succeed = (result: ParsedMail): void => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
+    promise
+      .then((result) => {
         clearTimeout(timeout);
         resolve(result);
-      };
-
-      const timeout = setTimeout(() => {
-        fail(new Error('Timed out while reading email content'));
-      }, READ_TIMEOUT_MS);
-
-      this.imap.openBox('INBOX', true, (openError) => {
-        if (openError) {
-          fail(openError);
-          return;
-        }
-
-        const fetch = this.imap.fetch(uid, { bodies: '' });
-        let sawMessage = false;
-
-        fetch.on('message', (msg) => {
-          sawMessage = true;
-
-          msg.on('body', (stream) => {
-            const chunks: Buffer[] = [];
-            let totalBytes = 0;
-
-            stream.on('data', (chunk: Buffer) => {
-              if (settled) {
-                return;
-              }
-
-              totalBytes += chunk.length;
-              if (totalBytes > MAX_MESSAGE_BYTES) {
-                fail(new Error(`Email content exceeds limit of ${MAX_MESSAGE_BYTES} bytes`));
-                return;
-              }
-
-              chunks.push(chunk);
-            });
-
-            stream.once('end', async () => {
-              if (settled) {
-                return;
-              }
-
-              try {
-                const parsed = await simpleParser(Buffer.concat(chunks, totalBytes));
-                succeed(parsed);
-              } catch (parseError) {
-                const error = parseError instanceof Error
-                  ? parseError
-                  : new Error('Failed to parse email content');
-                fail(error);
-              }
-            });
-
-            stream.once('error', (streamError: Error) => {
-              fail(streamError);
-            });
-          });
-        });
-
-        fetch.once('error', (fetchError: Error) => {
-          fail(fetchError);
-        });
-
-        fetch.once('end', () => {
-          if (!sawMessage) {
-            fail(new Error('Message not found'));
-            return;
-          }
-
-          if (!settled) {
-            fail(new Error('Message read completed without content'));
-          }
-        });
+      })
+      .catch((error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
       });
-    });
-  }
+  });
 }

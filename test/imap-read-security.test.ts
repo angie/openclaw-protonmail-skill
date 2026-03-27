@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events';
-import { PassThrough } from 'stream';
 import { IMAPClient } from '../src/imap';
 
 jest.mock('mailparser', () => ({
@@ -10,26 +9,23 @@ const { simpleParser: simpleParserMock } = jest.requireMock('mailparser') as {
   simpleParser: jest.Mock;
 };
 
-class FakeImap extends EventEmitter {
-  public openBox = jest.fn((_: string, __: boolean, callback: (err: Error | null, box?: object) => void) => {
-    callback(null, {});
-  });
-
-  public fetch = jest.fn((_uid: string, _options: object) => new EventEmitter());
-
-  public connect = jest.fn();
-  public end = jest.fn();
+class FakeImapFlow extends EventEmitter {
+  public mailboxOpen = jest.fn(async () => ({ path: 'INBOX' }));
+  public fetchOne = jest.fn(async () => false);
+  public connect = jest.fn(async () => undefined);
+  public logout = jest.fn(async () => undefined);
+  public close = jest.fn();
 }
 
-const fakeImapInstances: FakeImap[] = [];
+const fakeClientInstances: FakeImapFlow[] = [];
 
-jest.mock('imap', () => {
-  return jest.fn().mockImplementation(() => {
-    const instance = new FakeImap();
-    fakeImapInstances.push(instance);
+jest.mock('imapflow', () => ({
+  ImapFlow: jest.fn().mockImplementation(() => {
+    const instance = new FakeImapFlow();
+    fakeClientInstances.push(instance);
     return instance;
-  });
-});
+  }),
+}));
 
 function createClient(): IMAPClient {
   return new IMAPClient({
@@ -44,47 +40,37 @@ function createClient(): IMAPClient {
 describe('IMAPClient.readMessage security controls', () => {
   beforeEach(() => {
     simpleParserMock.mockClear();
-    fakeImapInstances.splice(0, fakeImapInstances.length);
+    fakeClientInstances.splice(0, fakeClientInstances.length);
   });
 
   it('rejects invalid message UIDs before opening mailbox', async () => {
     const client = createClient();
-    const imap = fakeImapInstances[0];
+    const imap = fakeClientInstances[0];
 
     await expect(client.readMessage('1:*')).rejects.toThrow('Message ID must be a positive numeric UID');
-    expect(imap.openBox).not.toHaveBeenCalled();
+    expect(imap.mailboxOpen).not.toHaveBeenCalled();
   });
 
-  it('rejects when fetch completes without a message', async () => {
+  it('rejects when fetch returns no message', async () => {
     const client = createClient();
-    const imap = fakeImapInstances[0];
-    const fetchEmitter = new EventEmitter();
+    const imap = fakeClientInstances[0];
 
-    imap.fetch.mockReturnValue(fetchEmitter);
+    (imap.fetchOne as jest.Mock).mockResolvedValue(false);
 
-    const promise = client.readMessage('42');
-    fetchEmitter.emit('end');
-
-    await expect(promise).rejects.toThrow('Message not found');
+    await expect(client.readMessage('42')).rejects.toThrow('Message not found');
   });
 
   it('rejects oversized email payloads before parsing', async () => {
     const client = createClient();
-    const imap = fakeImapInstances[0];
-    const fetchEmitter = new EventEmitter();
+    const imap = fakeClientInstances[0];
 
-    imap.fetch.mockReturnValue(fetchEmitter);
+    (imap.fetchOne as jest.Mock).mockResolvedValue({
+      uid: 43,
+      seq: 1,
+      source: Buffer.alloc(5 * 1024 * 1024 + 1),
+    });
 
-    const promise = client.readMessage('43');
-    const messageEmitter = new EventEmitter();
-    const bodyStream = new PassThrough();
-
-    fetchEmitter.emit('message', messageEmitter);
-    messageEmitter.emit('body', bodyStream);
-    bodyStream.write(Buffer.alloc(5 * 1024 * 1024 + 1));
-    bodyStream.end();
-
-    await expect(promise).rejects.toThrow('Email content exceeds limit');
+    await expect(client.readMessage('43')).rejects.toThrow('Email content exceeds limit');
     expect(simpleParserMock).not.toHaveBeenCalled();
   });
 });
