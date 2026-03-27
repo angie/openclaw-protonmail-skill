@@ -1,339 +1,221 @@
-/**
- * IMAP Client for Proton Mail Bridge
- * 
- * Provides low-level IMAP operations for reading emails from ProtonMail.
- * Connects to Bridge's local IMAP server (127.0.0.1:1143 by default).
- * 
- * @packageDocumentation
- */
+import { ImapFlow, SearchObject } from 'imapflow';
+import { ParsedMail, simpleParser } from 'mailparser';
+import { assertMessageUid, normaliseLimit } from './validation';
 
-import Imap from 'imap';
-import { simpleParser, ParsedMail } from 'mailparser';
+const DEFAULT_LIMIT = 10;
+const MAX_RESULT_LIMIT = 100;
+const CONNECT_TIMEOUT_MS = 10000;
+const READ_TIMEOUT_MS = 15000;
+const MAX_MESSAGE_BYTES = 5 * 1024 * 1024;
 
-/**
- * IMAP connection configuration
- */
 export interface IMAPConfig {
-  /** Bridge account username (email address) */
   user: string;
-  
-  /** Bridge-generated password */
   password: string;
-  
-  /** IMAP host (Bridge runs on localhost) */
   host: string;
-  
-  /** IMAP port (Bridge default: 1143) */
   port: number;
-  
-  /** Enable TLS (Bridge uses self-signed cert) */
   tls: boolean;
-  
-  /** TLS options (set rejectUnauthorized: false for Bridge) */
   tlsOptions?: { rejectUnauthorized: boolean };
 }
 
-/**
- * Email metadata returned by list operations
- */
 export interface EmailMetadata {
-  /** Message UID */
   uid: string;
-  
-  /** Sender address */
   from: string;
-  
-  /** Subject line */
   subject: string;
-  
-  /** Received date */
   date: Date;
-  
-  /** Read/unread status */
   flags: string[];
 }
 
-/**
- * IMAP client for reading emails via Proton Mail Bridge
- * 
- * @remarks
- * This client handles connection pooling and error recovery automatically.
- * Bridge must be running before calling connect().
- */
 export class IMAPClient {
-  private imap: Imap;
-  private config: IMAPConfig;
+  private client: ImapFlow;
   private isConnected = false;
 
-  /**
-   * Create a new IMAP client
-   * 
-   * @param config - IMAP connection settings
-   */
   constructor(config: IMAPConfig) {
-    this.config = config;
-    this.imap = new Imap(config);
-    
-    // Set up error handlers
-    this.imap.on('error', (err: Error) => {
-      console.error('IMAP error:', err);
+    this.client = new ImapFlow({
+      host: config.host,
+      port: config.port,
+      secure: config.tls,
+      doSTARTTLS: false,
+      auth: {
+        user: config.user,
+        pass: config.password,
+      },
+      tls: config.tlsOptions,
+      logger: false,
+      connectionTimeout: CONNECT_TIMEOUT_MS,
+    });
+
+    this.client.on('error', () => {
       this.isConnected = false;
     });
-    
-    this.imap.on('end', () => {
+
+    this.client.on('close', () => {
       this.isConnected = false;
     });
   }
 
-  /**
-   * Connect to Bridge IMAP server
-   * 
-   * @throws {Error} If Bridge is not running or credentials are invalid
-   * 
-   * @remarks
-   * Ensure Proton Mail Bridge is running before calling this.
-   * Connection timeout is 10 seconds by default.
-   */
   async connect(): Promise<void> {
     if (this.isConnected) {
-      return; // Already connected
+      return;
     }
-    
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('IMAP connection timeout - is Bridge running?'));
-      }, 10000);
-      
-      this.imap.once('ready', () => {
-        clearTimeout(timeout);
-        this.isConnected = true;
-        resolve();
-      });
-      
-      this.imap.once('error', (err: Error) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
-      
-      this.imap.connect();
-    });
+
+    await withTimeout(this.client.connect(), CONNECT_TIMEOUT_MS, 'IMAP connection timeout - is Bridge running?');
+    this.isConnected = true;
   }
 
-  /**
-   * Disconnect from Bridge
-   */
   async disconnect(): Promise<void> {
-    if (this.isConnected) {
-      this.imap.end();
+    if (!this.isConnected) {
+      return;
+    }
+
+    try {
+      await this.client.logout();
+    } catch {
+      this.client.close();
+    } finally {
       this.isConnected = false;
     }
   }
 
-  /**
-   * List emails from inbox
-   * 
-   * @param limit - Maximum emails to return
-   * @param unreadOnly - Filter to unread messages only
-   * @returns Array of email metadata
-   * 
-   * @example
-   * ```typescript
-   * const emails = await imap.listInbox(10, true);
-   * console.log(emails.map(e => `${e.from}: ${e.subject}`));
-   * ```
-   */
-  async listInbox(limit = 10, unreadOnly = false): Promise<EmailMetadata[]> {
-    return new Promise((resolve, reject) => {
-      this.imap.openBox('INBOX', true, (err, box) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        const searchCriteria = unreadOnly ? ['UNSEEN'] : ['ALL'];
-        
-        this.imap.search(searchCriteria, (err, results) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-
-          if (!results || results.length === 0) {
-            resolve([]);
-            return;
-          }
-
-          // Get the most recent messages up to limit
-          const uids = results.slice(-limit).reverse();
-          const emails: EmailMetadata[] = [];
-
-          const fetch = this.imap.fetch(uids, {
-            bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE)',
-            struct: true
-          });
-
-          fetch.on('message', (msg, seqno) => {
-            let buffer = '';
-            let uid = '';
-
-            msg.on('body', (stream) => {
-              stream.on('data', (chunk) => {
-                buffer += chunk.toString('utf8');
-              });
-            });
-
-            msg.once('attributes', (attrs) => {
-              uid = attrs.uid.toString();
-            });
-
-            msg.once('end', () => {
-              const header = Imap.parseHeader(buffer);
-              emails.push({
-                uid,
-                from: Array.isArray(header.from) ? header.from[0] : header.from || '',
-                subject: Array.isArray(header.subject) ? header.subject[0] : header.subject || '',
-                date: new Date(Array.isArray(header.date) ? header.date[0] : header.date || ''),
-                flags: []
-              });
-            });
-          });
-
-          fetch.once('error', reject);
-          
-          fetch.once('end', () => {
-            resolve(emails);
-          });
-        });
-      });
+  async listInbox(limit = DEFAULT_LIMIT, unreadOnly = false): Promise<EmailMetadata[]> {
+    const validatedLimit = normaliseLimit(limit, {
+      defaultValue: DEFAULT_LIMIT,
+      maxValue: MAX_RESULT_LIMIT,
     });
+
+    await this.client.mailboxOpen('INBOX', { readOnly: true });
+
+    const query: SearchObject = unreadOnly ? { seen: false } : { all: true };
+    const results = await this.client.search(query, { uid: true });
+    if (!results || results.length === 0) {
+      return [];
+    }
+
+    const uids = results.slice(-validatedLimit).reverse();
+    const emails: EmailMetadata[] = [];
+
+    for await (const message of this.client.fetch(
+      uids,
+      { uid: true, envelope: true, flags: true },
+      { uid: true }
+    )) {
+      emails.push({
+        uid: message.uid.toString(),
+        from: message.envelope?.from?.[0]?.address || '',
+        subject: message.envelope?.subject || '',
+        date: message.envelope?.date || new Date(''),
+        flags: Array.from(message.flags || []),
+      });
+    }
+
+    return emails;
   }
 
-  /**
-   * Search emails by query
-   * 
-   * @param query - Search query (supports IMAP search syntax)
-   * @param limit - Maximum results
-   * @returns Matching emails
-   * 
-   * @example
-   * Supported query formats:
-   * - `from:alice@example.com` - Emails from sender
-   * - `subject:meeting` - Subject contains keyword
-   * - `body:invoice` - Body contains keyword
-   * - `newer_than:7d` - Last 7 days
-   */
-  async search(query: string, limit = 10): Promise<EmailMetadata[]> {
-    return new Promise((resolve, reject) => {
-      this.imap.openBox('INBOX', true, (err, box) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        // Parse query into IMAP criteria
-        const criteria = this.parseSearchQuery(query);
-        
-        this.imap.search(criteria, (err, results) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-
-          if (!results || results.length === 0) {
-            resolve([]);
-            return;
-          }
-
-          const uids = results.slice(-limit).reverse();
-          const emails: EmailMetadata[] = [];
-
-          const fetch = this.imap.fetch(uids, {
-            bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE)',
-            struct: true
-          });
-
-          fetch.on('message', (msg, seqno) => {
-            let buffer = '';
-            let uid = '';
-
-            msg.on('body', (stream) => {
-              stream.on('data', (chunk) => {
-                buffer += chunk.toString('utf8');
-              });
-            });
-
-            msg.once('attributes', (attrs) => {
-              uid = attrs.uid.toString();
-            });
-
-            msg.once('end', () => {
-              const header = Imap.parseHeader(buffer);
-              emails.push({
-                uid,
-                from: Array.isArray(header.from) ? header.from[0] : header.from || '',
-                subject: Array.isArray(header.subject) ? header.subject[0] : header.subject || '',
-                date: new Date(Array.isArray(header.date) ? header.date[0] : header.date || ''),
-                flags: []
-              });
-            });
-          });
-
-          fetch.once('error', reject);
-          
-          fetch.once('end', () => {
-            resolve(emails);
-          });
-        });
-      });
+  async search(query: string, limit = DEFAULT_LIMIT): Promise<EmailMetadata[]> {
+    const validatedLimit = normaliseLimit(limit, {
+      defaultValue: DEFAULT_LIMIT,
+      maxValue: MAX_RESULT_LIMIT,
     });
+
+    await this.client.mailboxOpen('INBOX', { readOnly: true });
+
+    const criteria = this.parseSearchQuery(query);
+    const results = await this.client.search(criteria, { uid: true });
+    if (!results || results.length === 0) {
+      return [];
+    }
+
+    const uids = results.slice(-validatedLimit).reverse();
+    const emails: EmailMetadata[] = [];
+
+    for await (const message of this.client.fetch(
+      uids,
+      { uid: true, envelope: true, flags: true },
+      { uid: true }
+    )) {
+      emails.push({
+        uid: message.uid.toString(),
+        from: message.envelope?.from?.[0]?.address || '',
+        subject: message.envelope?.subject || '',
+        date: message.envelope?.date || new Date(''),
+        flags: Array.from(message.flags || []),
+      });
+    }
+
+    return emails;
   }
 
-  /**
-   * Parse search query string into IMAP criteria
-   * 
-   * @param query - User-friendly search query
-   * @returns IMAP search criteria array
-   * 
-   * @private
-   */
-  private parseSearchQuery(query: string): any[] {
-    const criteria: any[] = [];
+  async readMessage(messageId: string): Promise<ParsedMail> {
+    const uid = Number(assertMessageUid(messageId));
+    await this.client.mailboxOpen('INBOX', { readOnly: true });
 
-    const q = this.sanitizeSearchInput(query);
+    const message = await withTimeout(
+      this.client.fetchOne(
+        uid,
+        {
+          uid: true,
+          source: { maxLength: MAX_MESSAGE_BYTES + 1 },
+        },
+        { uid: true }
+      ),
+      READ_TIMEOUT_MS,
+      'Timed out while reading email content'
+    );
 
-    // Parse supported key:value filters with quoted or unquoted values
+    if (!message || !message.source) {
+      throw new Error('Message not found');
+    }
+
+    if (message.source.length > MAX_MESSAGE_BYTES) {
+      throw new Error(`Email content exceeds limit of ${MAX_MESSAGE_BYTES} bytes`);
+    }
+
+    return simpleParser(message.source);
+  }
+
+  private parseSearchQuery(query: string): SearchObject {
+    const criteria: SearchObject = {};
+    const normalisedQuery = this.sanitizeSearchInput(query);
     const filterRegex = /(from|subject|body):(?:"([^"]{1,200})"|([^\s]{1,200}))/gi;
     let match: RegExpExecArray | null;
-    while ((match = filterRegex.exec(q)) !== null) {
+
+    while ((match = filterRegex.exec(normalisedQuery)) !== null) {
       const key = match[1].toLowerCase();
       const rawValue = (match[2] || match[3] || '').trim();
       const value = this.sanitizeSearchValue(rawValue);
-      if (!value) continue;
+      if (!value) {
+        continue;
+      }
 
-      if (key === 'from') criteria.push(['FROM', value]);
-      if (key === 'subject') criteria.push(['SUBJECT', value]);
-      if (key === 'body') criteria.push(['BODY', value]);
+      if (key === 'from') criteria.from = value;
+      if (key === 'subject') criteria.subject = value;
+      if (key === 'body') criteria.body = value;
     }
 
-    const dateMatch = q.match(/newer_than:(\d{1,3})([dh])/i);
+    const dateMatch = normalisedQuery.match(/newer_than:(\d{1,3})([dh])/i);
     if (dateMatch) {
       const value = parseInt(dateMatch[1], 10);
       const unit = dateMatch[2].toLowerCase();
       if (value > 0 && value <= 365) {
         const date = new Date();
-        if (unit === 'd') date.setDate(date.getDate() - value);
-        else if (unit === 'h') date.setHours(date.getHours() - value);
-        criteria.push(['SINCE', date]);
+        if (unit === 'd') {
+          date.setDate(date.getDate() - value);
+        } else if (unit === 'h') {
+          date.setHours(date.getHours() - value);
+        }
+        criteria.since = date;
       }
     }
 
-    // If no supported filters, do safe keyword subject search
-    if (criteria.length === 0) {
-      const fallback = this.sanitizeSearchValue(q.replace(/(from|subject|body|newer_than):[^\s]+/gi, '').trim());
+    if (Object.keys(criteria).length === 0) {
+      const fallbackQuery = normalisedQuery
+        .replace(/\b(from|subject|body|newer_than):[^\s]+/gi, '')
+        .trim();
+      const fallback = this.sanitizeSearchValue(fallbackQuery);
       if (!fallback) {
         throw new Error('Search query is empty or contains unsupported characters');
       }
-      criteria.push(['SUBJECT', fallback]);
+
+      return { subject: fallback };
     }
 
     return criteria;
@@ -344,65 +226,57 @@ export class IMAPClient {
     if (!trimmed) {
       throw new Error('Search query is required');
     }
+
     if (trimmed.length > 200) {
       throw new Error('Search query too long (max 200 chars)');
     }
-    // Block CR/LF and control chars
-    if (/[\r\n\x00-\x1F\x7F]/.test(trimmed)) {
+
+    if (this.hasControlCharacters(trimmed)) {
       throw new Error('Search query contains invalid control characters');
     }
+
     return trimmed;
   }
 
   private sanitizeSearchValue(input: string): string {
     const value = (input || '').trim();
-    if (!value) return '';
-    // Allowlist: common email/search characters only
+    if (!value) {
+      return '';
+    }
+
     if (!/^[a-zA-Z0-9@._+\-\s:]+$/.test(value)) {
       throw new Error('Search query contains unsupported characters');
     }
+
     return value.slice(0, 200);
   }
 
-  /**
-   * Read full email content by UID
-   * 
-   * @param messageId - Message UID
-   * @returns Parsed email with headers, body, and attachments
-   * 
-   * @throws {Error} If message UID is invalid
-   * 
-   * @example
-   * ```typescript
-   * const email = await imap.readMessage('1234');
-   * console.log(email.text); // Plain text body
-   * console.log(email.html); // HTML body
-   * console.log(email.attachments); // File attachments
-   * ```
-   */
-  async readMessage(messageId: string): Promise<ParsedMail> {
-    return new Promise((resolve, reject) => {
-      this.imap.openBox('INBOX', true, (err, box) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+  private hasControlCharacters(value: string): boolean {
+    for (let index = 0; index < value.length; index += 1) {
+      const codePoint = value.charCodeAt(index);
+      if (codePoint < 32 || codePoint === 127) {
+        return true;
+      }
+    }
 
-        const fetch = this.imap.fetch(messageId, { bodies: '' });
-        
-        fetch.on('message', (msg) => {
-          msg.on('body', async (stream) => {
-            try {
-              const parsed = await simpleParser(stream as any);
-              resolve(parsed);
-            } catch (err) {
-              reject(err);
-            }
-          });
-        });
-
-        fetch.once('error', reject);
-      });
-    });
+    return false;
   }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    promise
+      .then((result) => {
+        clearTimeout(timeout);
+        resolve(result);
+      })
+      .catch((error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+  });
 }

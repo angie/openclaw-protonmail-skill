@@ -31,7 +31,7 @@ This skill handles sensitive email data. Key security principles:
 
 #### Authentication
 - **Bridge passwords are NOT your ProtonMail password** — Bridge generates separate credentials
-- Store credentials in OpenClaw config with restrictive file permissions (`chmod 600`)
+- Prefer OS keychain storage (`keytar`) with environment fallback for Bridge password
 - Never log or transmit credentials
 - Never commit credentials to version control
 

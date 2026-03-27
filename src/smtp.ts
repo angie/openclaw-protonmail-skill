@@ -9,6 +9,11 @@
 
 import nodemailer from 'nodemailer';
 import type { Transporter, SendMailOptions } from 'nodemailer';
+import {
+  sanitiseHeaderValue,
+  sanitiseOptionalHeaderValue,
+  sanitiseRequiredText,
+} from './validation';
 
 /**
  * SMTP connection configuration
@@ -114,14 +119,18 @@ export class SMTPClient {
     body: string,
     options?: SendOptions
   ): Promise<any> {
+    const sanitisedTo = sanitiseRecipients(to, 'to');
+    const sanitisedSubject = sanitiseHeaderValue(subject, 'subject');
+    const sanitisedBody = sanitiseRequiredText(body, 'body');
+
     const mailOptions: SendMailOptions = {
       from: this.config.auth.user,
-      to,
-      subject,
-      text: body,
+      to: sanitisedTo,
+      subject: sanitisedSubject,
+      text: sanitisedBody,
       html: options?.html,
-      cc: options?.cc,
-      bcc: options?.bcc,
+      cc: sanitiseRecipientList(options?.cc, 'cc'),
+      bcc: sanitiseRecipientList(options?.bcc, 'bcc'),
       attachments: options?.attachments
     };
 
@@ -175,6 +184,7 @@ export class SMTPClient {
     const subject = originalMessage.subject?.startsWith('Re: ')
       ? originalMessage.subject
       : `Re: ${originalMessage.subject ?? ''}`;
+    const sanitisedSubject = sanitiseHeaderValue(subject, 'subject');
 
     // References should be a space-separated string per RFC 5322.
     // mailparser may return it as string[] or string; normalise to string.
@@ -189,12 +199,29 @@ export class SMTPClient {
     const mailOptions: SendMailOptions = {
       from: this.config.auth.user,
       to: replyTo,
-      subject,
-      text: body,
+      subject: sanitisedSubject,
+      text: sanitiseRequiredText(body, 'body'),
       inReplyTo: originalMessage.messageId,
       references,
     };
 
     return this.transporter.sendMail(mailOptions);
   }
+}
+
+function sanitiseRecipientList(value: string | string[] | undefined, fieldName: string): string | string[] | undefined {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitiseHeaderValue(entry, fieldName));
+  }
+
+  return value === undefined ? undefined : sanitiseHeaderValue(value, fieldName);
+}
+
+function sanitiseRecipients(value: string, fieldName: string): string {
+  const sanitised = sanitiseOptionalHeaderValue(value, fieldName);
+  if (!sanitised) {
+    throw new Error(`${fieldName} is required`);
+  }
+
+  return sanitised;
 }

@@ -2,7 +2,7 @@
 name: protonmail
 description: ProtonMail integration via Proton Mail Bridge for reading and sending encrypted emails.
 homepage: https://github.com/rvacyber/openclaw-protonmail-skill
-metadata: {"openclaw":{"emoji":"🔐","requires":{"env":["PROTONMAIL_ACCOUNT","PROTONMAIL_BRIDGE_PASSWORD"]},"install":[{"id":"brew-bridge","kind":"brew","formula":"proton-mail-bridge","bins":[],"label":"Install Proton Mail Bridge (macOS)","cask":true}]}}
+metadata: {"openclaw":{"emoji":"🔐","requires":{"env":["PROTONMAIL_ACCOUNT"]},"install":[{"id":"brew-bridge","kind":"brew","formula":"proton-mail-bridge","bins":[],"label":"Install Proton Mail Bridge (macOS)","cask":true}]}}
 ---
 
 # ProtonMail Skill
@@ -28,14 +28,22 @@ Use ProtonMail for secure email via Proton Mail Bridge.
      "skills": {
        "entries": {
          "protonmail": {
-           "enabled": true,
-           "env": {
-             "PROTONMAIL_ACCOUNT": "your-email@pm.me",
-             "PROTONMAIL_BRIDGE_PASSWORD": "bridge-generated-password"
-           }
-         }
-       }
-     }
+            "enabled": true,
+            "env": {
+              "PROTONMAIL_ACCOUNT": "your-email@pm.me"
+            }
+          }
+        }
+      }
+    }
+    ```
+
+   Optional fallback env vars:
+   ```json
+   {
+     "PROTONMAIL_BRIDGE_PASSWORD": "bridge-generated-password",
+     "PROTONMAIL_KEYCHAIN_SERVICE": "openclaw-protonmail-skill",
+     "PROTONMAIL_KEYCHAIN_ACCOUNT": "your-email@pm.me"
    }
    ```
 
@@ -55,8 +63,11 @@ protonmail list-inbox --limit=10 [--unread]
 # Search emails
 protonmail search "from:alice@example.com" --limit=20
 
-# Read specific email
+# Read specific email metadata
 protonmail read <uid>
+
+# Read specific email including body content
+protonmail read <uid> --include-body
 
 # Send email
 protonmail send --to=bob@example.com --subject="Meeting" --body="See you at 3pm"
@@ -85,7 +96,7 @@ protonmail reply <uid> --body="Sounds good!"
 
 - ✅ Official Proton software (audited, open-source Bridge)
 - ✅ End-to-end encryption maintained
-- ✅ Credentials stored locally only
+- ✅ Keychain-first password lookup with local fallback
 - ✅ No API keys or tokens — uses standard IMAP/SMTP
 - ✅ Bridge password is separate from your ProtonMail password
 

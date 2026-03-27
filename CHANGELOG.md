@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed insecure TLS bypass configuration
   - Enforced localhost-only Bridge host policy
   - Hardened IMAP search query parsing and input sanitization
+- Replaced legacy `imap` dependency with maintained `imapflow` client
 - README now includes a clear Security Feedback Response section with remediation details
 
 ### Added
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Example configuration files
 - Environment variable support (PROTONMAIL_ACCOUNT, PROTONMAIL_BRIDGE_PASSWORD)
 - Proper OpenClaw skill config format (`skills.entries.protonmail`)
+- Optional keychain-first Bridge password resolution (`keytar`) with env fallback
 
 ### Changed
 - Updated nodemailer to v8.0.1 (security fixes)

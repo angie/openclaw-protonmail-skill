@@ -143,4 +143,12 @@ describe('SMTPClient.reply()', () => {
     await expect(smtp.reply(broken, 'Hi')).rejects.toThrow();
     expect(mockSendMail).not.toHaveBeenCalled();
   });
+
+  it('rejects unsafe subject headers in original message', async () => {
+    const smtp = makeSmtp();
+    const poisoned = parsedMail({ subject: 'Hi\nBCC:mallory@example.com' });
+
+    await expect(smtp.reply(poisoned, 'Hi')).rejects.toThrow('subject contains invalid control characters');
+    expect(mockSendMail).not.toHaveBeenCalled();
+  });
 });

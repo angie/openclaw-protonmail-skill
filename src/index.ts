@@ -25,6 +25,12 @@
 import { IMAPClient } from './imap';
 import { SMTPClient } from './smtp';
 import { registerTools } from './tools';
+import { resolveBridgePassword } from './credential-store';
+import { assertMessageUid, normaliseLimit } from './validation';
+
+const DEFAULT_LIST_LIMIT = 10;
+const DEFAULT_SEARCH_LIMIT = 10;
+const MAX_RESULT_LIMIT = 100;
 
 /**
  * Configuration options for ProtonMail skill
@@ -35,6 +41,12 @@ export interface ProtonMailConfig {
   
   /** Bridge-generated password (NOT your ProtonMail password) */
   bridgePassword?: string;
+
+  /** Optional keychain service name for Bridge password lookup */
+  keychainService?: string;
+
+  /** Optional keychain account override (default: ProtonMail account) */
+  keychainAccount?: string;
   
   /** IMAP host (default: 127.0.0.1) */
   imapHost?: string;
@@ -52,17 +64,29 @@ export interface ProtonMailConfig {
 /**
  * Load configuration from environment variables or passed config
  */
-function loadConfig(config?: ProtonMailConfig): Required<Omit<ProtonMailConfig, 'account' | 'bridgePassword'>> & { account: string; bridgePassword: string } {
+async function loadConfig(
+  config?: ProtonMailConfig
+): Promise<
+  Required<Omit<ProtonMailConfig, 'account' | 'bridgePassword' | 'keychainService' | 'keychainAccount'>> & {
+    account: string;
+    bridgePassword: string;
+    keychainService?: string;
+    keychainAccount?: string;
+  }
+> {
   const account = config?.account || process.env.PROTONMAIL_ACCOUNT;
-  const bridgePassword = config?.bridgePassword || process.env.PROTONMAIL_BRIDGE_PASSWORD;
-  
+
   if (!account) {
     throw new Error('ProtonMail account not configured. Set PROTONMAIL_ACCOUNT env var or pass account in config.');
   }
-  
-  if (!bridgePassword) {
-    throw new Error('ProtonMail Bridge password not configured. Set PROTONMAIL_BRIDGE_PASSWORD env var or pass bridgePassword in config.');
-  }
+
+  const bridgePassword = await resolveBridgePassword({
+    account,
+    bridgePassword: config?.bridgePassword,
+    envPassword: process.env.PROTONMAIL_BRIDGE_PASSWORD,
+    keychainService: config?.keychainService || process.env.PROTONMAIL_KEYCHAIN_SERVICE,
+    keychainAccount: config?.keychainAccount || process.env.PROTONMAIL_KEYCHAIN_ACCOUNT,
+  });
   
   return {
     account,
@@ -81,8 +105,9 @@ function loadConfig(config?: ProtonMailConfig): Required<Omit<ProtonMailConfig, 
  * high-level email operations for OpenClaw.
  */
 export class ProtonMailSkill {
-  private imap: IMAPClient;
-  private smtp: SMTPClient;
+  private readonly config?: ProtonMailConfig;
+  private imap: IMAPClient | null = null;
+  private smtp: SMTPClient | null = null;
 
   /**
    * Create a new ProtonMail skill instance
@@ -98,8 +123,37 @@ export class ProtonMailSkill {
    * 2. Environment variables (PROTONMAIL_ACCOUNT, PROTONMAIL_BRIDGE_PASSWORD)
    */
   constructor(config?: ProtonMailConfig) {
-    const fullConfig = loadConfig(config);
-    
+    const account = config?.account || process.env.PROTONMAIL_ACCOUNT;
+    if (!account) {
+      throw new Error('ProtonMail account not configured. Set PROTONMAIL_ACCOUNT env var or pass account in config.');
+    }
+
+    this.config = config;
+  }
+
+  private getClients(): { imap: IMAPClient; smtp: SMTPClient } {
+    if (!this.imap || !this.smtp) {
+      throw new Error('ProtonMail skill is not initialized. Call initialize() first.');
+    }
+
+    return { imap: this.imap, smtp: this.smtp };
+  }
+
+  /**
+   * Initialize the skill and register tools with OpenClaw
+   *
+   * @throws {Error} If Bridge is not running or credentials are invalid
+   *
+   * @remarks
+   * Ensure Proton Mail Bridge is running before calling this method.
+   */
+  async initialize(): Promise<void> {
+    if (this.imap && this.smtp) {
+      return;
+    }
+
+    const fullConfig = await loadConfig(this.config);
+
     // Security hardening: Proton Bridge must be localhost-only
     const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
     if (!localHosts.has(fullConfig.imapHost) || !localHosts.has(fullConfig.smtpHost)) {
@@ -112,7 +166,6 @@ export class ProtonMailSkill {
       host: fullConfig.imapHost,
       port: fullConfig.imapPort,
       tls: false,
-      autotls: 'never'
     };
 
     const smtpConfig = {
@@ -127,17 +180,7 @@ export class ProtonMailSkill {
 
     this.imap = new IMAPClient(imapConfig);
     this.smtp = new SMTPClient(smtpConfig);
-  }
 
-  /**
-   * Initialize the skill and register tools with OpenClaw
-   * 
-   * @throws {Error} If Bridge is not running or credentials are invalid
-   * 
-   * @remarks
-   * Ensure Proton Mail Bridge is running before calling this method.
-   */
-  async initialize(): Promise<void> {
     await this.imap.connect();
     registerTools(this);
   }
@@ -149,7 +192,13 @@ export class ProtonMailSkill {
    * Always call this when shutting down to cleanly close connections.
    */
   async cleanup(): Promise<void> {
+    if (!this.imap) {
+      return;
+    }
+
     await this.imap.disconnect();
+    this.imap = null;
+    this.smtp = null;
   }
 
   // ========================================
@@ -169,7 +218,13 @@ export class ProtonMailSkill {
    * ```
    */
   async listInbox(limit = 10, unreadOnly = false): Promise<any[]> {
-    return this.imap.listInbox(limit, unreadOnly);
+    const { imap } = this.getClients();
+    const validatedLimit = normaliseLimit(limit, {
+      defaultValue: DEFAULT_LIST_LIMIT,
+      maxValue: MAX_RESULT_LIMIT,
+    });
+
+    return imap.listInbox(validatedLimit, unreadOnly);
   }
 
   /**
@@ -185,7 +240,13 @@ export class ProtonMailSkill {
    * ```
    */
   async searchEmails(query: string, limit = 10): Promise<any[]> {
-    return this.imap.search(query, limit);
+    const { imap } = this.getClients();
+    const validatedLimit = normaliseLimit(limit, {
+      defaultValue: DEFAULT_SEARCH_LIMIT,
+      maxValue: MAX_RESULT_LIMIT,
+    });
+
+    return imap.search(query, validatedLimit);
   }
 
   /**
@@ -197,7 +258,8 @@ export class ProtonMailSkill {
    * @throws {Error} If message ID is invalid or email doesn't exist
    */
   async readEmail(messageId: string): Promise<any> {
-    return this.imap.readMessage(messageId);
+    const { imap } = this.getClients();
+    return imap.readMessage(assertMessageUid(messageId));
   }
 
   /**
@@ -220,7 +282,8 @@ export class ProtonMailSkill {
    * ```
    */
   async sendEmail(to: string, subject: string, body: string, options?: any): Promise<any> {
-    return this.smtp.send(to, subject, body, options);
+    const { smtp } = this.getClients();
+    return smtp.send(to, subject, body, options);
   }
 
   /**
@@ -235,8 +298,9 @@ export class ProtonMailSkill {
    * to maintain threading.
    */
   async replyToEmail(messageId: string, body: string): Promise<any> {
-    const original = await this.imap.readMessage(messageId);
-    return this.smtp.reply(original, body);
+    const { imap, smtp } = this.getClients();
+    const original = await imap.readMessage(assertMessageUid(messageId));
+    return smtp.reply(original, body);
   }
 }
 

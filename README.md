@@ -122,8 +122,7 @@ Add to your OpenClaw config (`~/.openclaw/openclaw.json`):
       "protonmail": {
         "enabled": true,
         "env": {
-          "PROTONMAIL_ACCOUNT": "your-email@pm.me",
-          "PROTONMAIL_BRIDGE_PASSWORD": "bridge-generated-password"
+          "PROTONMAIL_ACCOUNT": "your-email@pm.me"
         }
       }
     }
@@ -131,9 +130,19 @@ Add to your OpenClaw config (`~/.openclaw/openclaw.json`):
 }
 ```
 
+Optional fallback env vars:
+
+```json
+{
+  "PROTONMAIL_BRIDGE_PASSWORD": "bridge-generated-password",
+  "PROTONMAIL_KEYCHAIN_SERVICE": "openclaw-protonmail-skill",
+  "PROTONMAIL_KEYCHAIN_ACCOUNT": "your-email@pm.me"
+}
+```
+
 **Important Notes:**
 - Use `skills.entries.protonmail` (not `skills.protonmail`)
-- Credentials are stored locally in your OpenClaw config
+- Password resolution order is: config value → OS keychain → `PROTONMAIL_BRIDGE_PASSWORD`
 - Never commit your config with real credentials to version control
 - The Bridge password is separate from your ProtonMail password
 
@@ -155,7 +164,7 @@ The skill provides these tool functions to OpenClaw:
 
 - `protonmail-list-inbox` — List recent inbox messages
 - `protonmail-search` — Search emails by query
-- `protonmail-read` — Read a specific email by ID
+- `protonmail-read` — Read a specific email by ID (metadata by default)
 - `protonmail-send` — Send a new email
 - `protonmail-reply` — Reply to an email thread
 
@@ -224,7 +233,7 @@ If you spot additional concerns, open a GitHub issue with reproduction steps and
 
 - **Proton Bridge runs locally** — No third-party services involved
 - **End-to-end encryption maintained** — Bridge decrypts locally, encrypted in transit to Proton servers
-- **Credentials never leave your machine** — Stored in OpenClaw config, never logged or transmitted
+- **Credentials never leave your machine** — Resolved from config/keychain/env locally, never logged or transmitted
 - **Localhost-only connections** — IMAP/SMTP traffic stays on your machine (unencrypted localhost is acceptable)
 - **Open source** — Audit the code yourself
 
